@@ -6,7 +6,6 @@ YOLO-based bird detection and species classification. Downloads images from iNat
 
 - **Model:** YOLOv11s fine-tuned for bird detection
 - **Species:** 36 species (see [classes.txt](classes.txt))
-- **Classification:** 400+ species via HuggingFace EfficientNet-b2
 
 ## Quick Start
 
