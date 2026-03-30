@@ -1,0 +1,28 @@
+# Python caches
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Datasets and auto-labeled data
+dataset/
+unlabeled.txt
+
+# YOLO training runs
+runs/
+
+# Prediction outputs
+image_prediction_results/
+video_prediction_results/
+
+# Large model files
+*.pt
+*.onnx
+yolov8n.pt
+
+# OS generated files
+.DS_Store
+Thumbs.db
