@@ -26,6 +26,9 @@ evaluation_results/
 *.onnx
 yolov8n.pt
 
+# Allow baseline model
+!baseline/bird_detection.onnx
+
 # OS generated files
 .DS_Store
 Thumbs.db

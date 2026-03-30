@@ -6,6 +6,7 @@ YOLO-based bird detection and species classification. Downloads images from iNat
 
 - **Model:** YOLOv11s fine-tuned for bird detection
 - **Species:** 36 species (see [classes.txt](classes.txt))
+- **Baseline:** `baseline/bird_detection.onnx` — the current production model to compare against
 
 ## Quick Start
 
@@ -26,8 +27,9 @@ python review_labels.py
 # 5. Train
 python train_model.py
 
-# 6. Evaluate
-python evaluate_model.py runs/detect/train/weights/best.pt --data dataset/data.yaml
+# 6. Evaluate against baseline
+python evaluate_model.py runs/detect/train/weights/best.pt \
+  --compare baseline/bird_detection.onnx --data dataset/data.yaml
 ```
 
 ## Pipeline
@@ -71,7 +73,7 @@ yolo detect predict model=best.pt source=path/to/folder/
 | `auto_label.py` | Auto-generate YOLO bounding boxes | `python auto_label.py --conf-thresh 0.25` |
 | `review_labels.py` | Visually review generated labels | `python review_labels.py --n 50` |
 | `train_model.py` | Train YOLO model | `python train_model.py --epochs 100 --model yolo11m.pt` |
-| `evaluate_model.py` | Evaluate and compare models | `python evaluate_model.py best.pt --compare old.pt` |
+| `evaluate_model.py` | Evaluate and compare models | `python evaluate_model.py best.pt --compare baseline/bird_detection.onnx` |
 | `classify_bird.py` | Classify species from cropped image | `python classify_bird.py bird.jpg --top 5` |
 | `convert_model.py` | Export model to ONNX | `python convert_model.py best.pt` |
 | `inspect_model.py` | Print model architecture and classes | `python inspect_model.py model.pt` |

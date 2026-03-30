@@ -21,10 +21,10 @@ There are two main ways to contribute: adding new bird species or improving dete
    ```bash
    python train_model.py
    ```
-6. Evaluate and compare against the previous model:
+6. Evaluate and compare against the baseline model:
    ```bash
    python evaluate_model.py runs/detect/train/weights/best.pt \
-     --compare <previous_model.pt> --data dataset/data.yaml
+     --compare baseline/bird_detection.onnx --data dataset/data.yaml
    ```
 7. Include the comparison output in your PR description
 
@@ -34,14 +34,14 @@ There are two main ways to contribute: adding new bird species or improving dete
 - Add more training data for underperforming species
 - Try different base models (`yolo11n.pt`, `yolo11s.pt`, `yolo11m.pt`)
 
-Same evaluation step at the end: run `evaluate_model.py --compare` and include the output in your PR.
+Same evaluation step at the end: run `evaluate_model.py --compare baseline/bird_detection.onnx` and include the output in your PR.
 
 ## PR Requirements
 
 - **Must** include `evaluate_model.py` comparison output in the PR description
-- New model's mAP50 must be >= baseline mAP50
+- New model's mAP50 must be >= baseline mAP50 (baseline: `baseline/bird_detection.onnx`)
 - If adding species: update `classes.txt`
-- Do not commit model weight files (`.pt`, `.onnx`) — they are gitignored
+- Do not commit model weight files (`.pt`, `.onnx`) to the root — they are gitignored. The baseline model in `baseline/` is the exception.
 
 ## Tips
 
