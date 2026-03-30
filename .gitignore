@@ -18,6 +18,9 @@ runs/
 image_prediction_results/
 video_prediction_results/
 
+# Evaluation outputs
+evaluation_results/
+
 # Large model files
 *.pt
 *.onnx

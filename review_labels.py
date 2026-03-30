@@ -10,109 +10,117 @@
 
 import argparse
 import random
+import sys
 from pathlib import Path
 import cv2 as cv
 import yaml
-
-DATASET_DIR = Path("dataset")
-
-parser = argparse.ArgumentParser(description="Review auto-generated bounding box labels")
-parser.add_argument("--n",     type=int, default=20,      help="Number of images to review (default: 20)")
-parser.add_argument("--split", default="all",             help="Which split to sample: train | val | all (default: all)")
-args = parser.parse_args()
-
-# ── Load data.yaml to get class names ─────────────────────────────────────────
-data_yaml_path = DATASET_DIR / "data.yaml"
-if not data_yaml_path.exists():
-    print(f"Error: '{data_yaml_path}' not found. Run auto_label.py first.")
-    exit(1)
-
-with open(data_yaml_path) as f:
-    data_config = yaml.safe_load(f)
-
-class_names = data_config.get("names", [])
-if not class_names:
-    print("Error: No class names found in data.yaml")
-    exit(1)
-
-# ── Collect (image, label) pairs ─────────────────────────────────────────────
-pairs = []
-splits = ["train", "val"] if args.split == "all" else [args.split]
-
-for split in splits:
-    img_dir = DATASET_DIR / "images" / split
-    lbl_dir = DATASET_DIR / "labels" / split
-    if not img_dir.exists():
-        print(f"Warning: '{img_dir}' not found — run auto_label.py first.")
-        continue
-    for img_path in img_dir.iterdir():
-        lbl_path = lbl_dir / (img_path.stem + ".txt")
-        if lbl_path.exists():
-            pairs.append((img_path, lbl_path))
-
-if not pairs:
-    print("No labeled images found. Run auto_label.py first.")
-    exit(1)
-
-random.shuffle(pairs)
-sample = pairs[:args.n]
-
-print(f"Reviewing {len(sample)} images. Press any key to advance, 'q' to quit.\n")
 
 COLORS = [
     (255,  80,  80), (80, 200,  80), (80, 120, 255),
     (255, 200,  50), (200,  80, 255), (50, 220, 220),
 ]
 
-for i, (img_path, lbl_path) in enumerate(sample, 1):
-    img = cv.imread(str(img_path))
-    if img is None:
-        print(f"  [{i}] Could not read {img_path}")
-        continue
 
-    h, w = img.shape[:2]
+def main():
+    parser = argparse.ArgumentParser(description="Review auto-generated bounding box labels")
+    parser.add_argument("--n",           type=int, default=20,    help="Number of images to review (default: 20)")
+    parser.add_argument("--split",       default="all",           help="Which split to sample: train | val | all (default: all)")
+    parser.add_argument("--dataset-dir", default="dataset",       help="Path to dataset directory (default: dataset)")
+    args = parser.parse_args()
 
-    with open(lbl_path) as f:
-        lines = f.read().strip().splitlines()
+    dataset_dir = Path(args.dataset_dir)
 
-    for line in lines:
-        parts = line.split()
-        cls_idx = int(parts[0])
-        cx, cy, bw, bh = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+    # ── Load data.yaml to get class names ─────────────────────────────────────────
+    data_yaml_path = dataset_dir / "data.yaml"
+    if not data_yaml_path.exists():
+        print(f"Error: '{data_yaml_path}' not found. Run auto_label.py first.")
+        sys.exit(1)
 
-        # Convert normalised YOLO → pixel coords
-        x1 = int((cx - bw / 2) * w)
-        y1 = int((cy - bh / 2) * h)
-        x2 = int((cx + bw / 2) * w)
-        y2 = int((cy + bh / 2) * h)
+    with open(data_yaml_path) as f:
+        data_config = yaml.safe_load(f)
 
-        color = COLORS[cls_idx % len(COLORS)]
+    class_names = data_config.get("names", [])
+    if not class_names:
+        print("Error: No class names found in data.yaml")
+        sys.exit(1)
 
-        # Draw box + species label
-        cv.rectangle(img, (x1, y1), (x2, y2), color, 2)
-        species_name = class_names[cls_idx] if cls_idx < len(class_names) else f"Unknown (cls {cls_idx})"
-        label = f"{species_name}"
-        (tw, th), _ = cv.getTextSize(label, cv.FONT_HERSHEY_SIMPLEX, 0.55, 1)
-        cv.rectangle(img, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv.putText(img, label, (x1 + 2, y1 - 4),
-                   cv.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+    # ── Collect (image, label) pairs ─────────────────────────────────────────────
+    pairs = []
+    splits = ["train", "val"] if args.split == "all" else [args.split]
 
-    # Show image info in top-left corner
-    title = f"[{i}/{len(sample)}]  {img_path.name}"
-    cv.putText(img, title, (8, 24), cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 3)
-    cv.putText(img, title, (8, 24), cv.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
+    for split in splits:
+        img_dir = dataset_dir / "images" / split
+        lbl_dir = dataset_dir / "labels" / split
+        if not img_dir.exists():
+            print(f"Warning: '{img_dir}' not found -- run auto_label.py first.")
+            continue
+        for img_path in img_dir.iterdir():
+            lbl_path = lbl_dir / (img_path.stem + ".txt")
+            if lbl_path.exists():
+                pairs.append((img_path, lbl_path))
 
-    # Scale down large images so they fit on screen
-    max_dim = 900
-    if max(h, w) > max_dim:
-        scale = max_dim / max(h, w)
-        img = cv.resize(img, (int(w * scale), int(h * scale)))
+    if not pairs:
+        print("No labeled images found. Run auto_label.py first.")
+        sys.exit(1)
 
-    cv.imshow("Label Review  (any key = next | q = quit)", img)
-    key = cv.waitKey(0) & 0xFF
-    if key == ord("q"):
-        print("Quit.")
-        break
+    random.shuffle(pairs)
+    sample = pairs[:args.n]
 
-cv.destroyAllWindows()
-print("Review complete.")
+    print(f"Reviewing {len(sample)} images. Press any key to advance, 'q' to quit.\n")
+
+    for i, (img_path, lbl_path) in enumerate(sample, 1):
+        img = cv.imread(str(img_path))
+        if img is None:
+            print(f"  [{i}] Could not read {img_path}")
+            continue
+
+        h, w = img.shape[:2]
+
+        with open(lbl_path) as f:
+            lines = f.read().strip().splitlines()
+
+        for line in lines:
+            parts = line.split()
+            cls_idx = int(parts[0])
+            cx, cy, bw, bh = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+
+            # Convert normalised YOLO -> pixel coords
+            x1 = int((cx - bw / 2) * w)
+            y1 = int((cy - bh / 2) * h)
+            x2 = int((cx + bw / 2) * w)
+            y2 = int((cy + bh / 2) * h)
+
+            color = COLORS[cls_idx % len(COLORS)]
+
+            # Draw box + species label
+            cv.rectangle(img, (x1, y1), (x2, y2), color, 2)
+            species_name = class_names[cls_idx] if cls_idx < len(class_names) else f"Unknown (cls {cls_idx})"
+            label = f"{species_name}"
+            (tw, th), _ = cv.getTextSize(label, cv.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+            cv.rectangle(img, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
+            cv.putText(img, label, (x1 + 2, y1 - 4),
+                       cv.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+
+        # Show image info in top-left corner
+        title = f"[{i}/{len(sample)}]  {img_path.name}"
+        cv.putText(img, title, (8, 24), cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 3)
+        cv.putText(img, title, (8, 24), cv.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
+
+        # Scale down large images so they fit on screen
+        max_dim = 900
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            img = cv.resize(img, (int(w * scale), int(h * scale)))
+
+        cv.imshow("Label Review  (any key = next | q = quit)", img)
+        key = cv.waitKey(0) & 0xFF
+        if key == ord("q"):
+            print("Quit.")
+            break
+
+    cv.destroyAllWindows()
+    print("Review complete.")
+
+
+if __name__ == "__main__":
+    main()

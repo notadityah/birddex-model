@@ -9,112 +9,126 @@
 #   dataset/labels/train/   dataset/labels/val/
 #   data.yaml
 
+import argparse
 import os
-import shutil
 import random
+import shutil
 from pathlib import Path
+
 from ultralytics import YOLO
 
-# ── Config ───────────────────────────────────────────────────────────────────
-DATASET_DIR   = Path("dataset")
-OUTPUT_DIR    = Path("dataset")          # images/ and labels/ written here
-VAL_SPLIT     = 0.10                     # 10% validation
-CONF_THRESH   = 0.20                     # min confidence for a bird detection
-YOLO_BIRD_CLS = 14                       # COCO class id for "bird"
-DETECTOR_MODEL = "yolov8n.pt"           # small, fast; downloads automatically
-SEED          = 42
+YOLO_BIRD_CLS = 14  # COCO class id for "bird"
+SEED = 42
 
-random.seed(SEED)
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-# ── Discover species folders ─────────────────────────────────────────────────
-species_dirs = sorted([
-    d for d in DATASET_DIR.iterdir()
-    if d.is_dir() and not d.name.startswith(".") and d.name not in ("images", "labels")
-])
 
-if not species_dirs:
-    raise RuntimeError(f"No species folders found in '{DATASET_DIR}'")
+def main():
+    parser = argparse.ArgumentParser(
+        description="Auto-label bird images using a pretrained YOLO detector.",
+    )
+    parser.add_argument("--dataset-dir", default="dataset", help="Root dataset directory (default: dataset)")
+    parser.add_argument("--conf-thresh", type=float, default=0.20, help="Min detection confidence (default: 0.20)")
+    parser.add_argument("--val-split", type=float, default=0.10, help="Fraction for validation split (default: 0.10)")
+    parser.add_argument("--detector-model", default="yolov8n.pt", help="Pretrained detector model (default: yolov8n.pt)")
+    args = parser.parse_args()
 
-# Map folder name → class index (alphabetical order)
-classes     = [d.name for d in species_dirs]
-cls_to_idx  = {name: idx for idx, name in enumerate(classes)}
-num_classes = len(classes)
+    dataset_dir = Path(args.dataset_dir)
+    output_dir = dataset_dir
+    val_split = args.val_split
+    conf_thresh = args.conf_thresh
+    detector_model = args.detector_model
 
-print(f"Found {num_classes} species:")
-for i, c in enumerate(classes):
-    print(f"  {i:>2}: {c}")
+    random.seed(SEED)
 
-# ── Load YOLOv8 detector ─────────────────────────────────────────────────────
-print(f"\nLoading detector '{DETECTOR_MODEL}' ...")
-detector = YOLO(DETECTOR_MODEL)
+    # ── Discover species folders ─────────────────────────────────────────────
+    species_dirs = sorted([
+        d for d in dataset_dir.iterdir()
+        if d.is_dir() and not d.name.startswith(".") and d.name not in ("images", "labels")
+    ])
 
-# ── Prepare output directories ───────────────────────────────────────────────
-for split in ("train", "val"):
-    (OUTPUT_DIR / "images" / split).mkdir(parents=True, exist_ok=True)
-    (OUTPUT_DIR / "labels" / split).mkdir(parents=True, exist_ok=True)
+    if not species_dirs:
+        raise RuntimeError(f"No species folders found in '{dataset_dir}'")
 
-# ── Label all images ─────────────────────────────────────────────────────────
-IMAGE_EXTS   = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-labeled      = 0
-skipped      = 0
-skipped_list = []
+    # Map folder name -> class index (alphabetical order)
+    classes = [d.name for d in species_dirs]
+    cls_to_idx = {name: idx for idx, name in enumerate(classes)}
+    num_classes = len(classes)
 
-for species_dir in species_dirs:
-    cls_idx   = cls_to_idx[species_dir.name]
-    images    = [f for f in species_dir.iterdir() if f.suffix.lower() in IMAGE_EXTS]
+    print(f"Found {num_classes} species:")
+    for i, c in enumerate(classes):
+        print(f"  {i:>2}: {c}")
 
-    if not images:
-        continue
+    # ── Load YOLOv8 detector ─────────────────────────────────────────────────
+    print(f"\nLoading detector '{detector_model}' ...")
+    detector = YOLO(detector_model)
 
-    random.shuffle(images)
-    n_val   = max(1, int(len(images) * VAL_SPLIT))
-    val_set = set(f.name for f in images[:n_val])
+    # ── Prepare output directories ───────────────────────────────────────────
+    for split in ("train", "val"):
+        (output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+        (output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
 
-    print(f"\n[{species_dir.name}] {len(images)} images  |  {n_val} val")
+    # ── Label all images ─────────────────────────────────────────────────────
+    labeled = 0
+    skipped = 0
+    skipped_list = []
 
-    for img_path in images:
-        split = "val" if img_path.name in val_set else "train"
+    for species_dir in species_dirs:
+        cls_idx = cls_to_idx[species_dir.name]
+        images = [f for f in species_dir.iterdir() if f.suffix.lower() in IMAGE_EXTS]
 
-        # ── Run detection ────────────────────────────────────────────────────
-        results = detector.predict(
-            source=str(img_path),
-            conf=CONF_THRESH,
-            classes=[YOLO_BIRD_CLS],
-            verbose=False,
-        )[0]
-
-        boxes = results.boxes
-        if boxes is None or len(boxes) == 0:
-            skipped += 1
-            skipped_list.append(str(img_path))
+        if not images:
             continue
 
-        # ── Pick the highest-confidence bird box ─────────────────────────────
-        best_idx = int(boxes.conf.argmax())
-        xywhn    = boxes.xywhn[best_idx].tolist()  # [cx, cy, w, h] normalised
+        random.shuffle(images)
+        n_val = max(1, int(len(images) * val_split))
+        val_set = set(f.name for f in images[:n_val])
 
-        # ── Copy image ───────────────────────────────────────────────────────
-        dst_img = OUTPUT_DIR / "images" / split / img_path.name
-        shutil.copy2(img_path, dst_img)
+        print(f"\n[{species_dir.name}] {len(images)} images  |  {n_val} val")
 
-        # ── Write YOLO label ─────────────────────────────────────────────────
-        dst_lbl = OUTPUT_DIR / "labels" / split / (img_path.stem + ".txt")
-        with open(dst_lbl, "w") as f:
-            f.write(f"{cls_idx} {xywhn[0]:.6f} {xywhn[1]:.6f} {xywhn[2]:.6f} {xywhn[3]:.6f}\n")
+        for img_path in images:
+            split = "val" if img_path.name in val_set else "train"
 
-        labeled += 1
+            # ── Run detection ────────────────────────────────────────────────
+            results = detector.predict(
+                source=str(img_path),
+                conf=conf_thresh,
+                classes=[YOLO_BIRD_CLS],
+                verbose=False,
+            )[0]
 
-# ── Write unlabeled log ───────────────────────────────────────────────────────
-unlabeled_file = Path("unlabeled.txt")
-if skipped_list:
-    unlabeled_file.write_text("\n".join(skipped_list))
-    print(f"\nImages with no bird detected saved to '{unlabeled_file}' for manual review.")
+            boxes = results.boxes
+            if boxes is None or len(boxes) == 0:
+                skipped += 1
+                skipped_list.append(str(img_path))
+                continue
 
-# ── Write data.yaml ───────────────────────────────────────────────────────────
-data_yaml = Path("data.yaml")
-abs_dataset = OUTPUT_DIR.resolve().as_posix()
+            # ── Pick the highest-confidence bird box ─────────────────────────
+            best_idx = int(boxes.conf.argmax())
+            xywhn = boxes.xywhn[best_idx].tolist()  # [cx, cy, w, h] normalised
 
-yaml_content = f"""# Auto-generated by auto_label.py
+            # ── Copy image ───────────────────────────────────────────────────
+            dst_img = output_dir / "images" / split / img_path.name
+            shutil.copy2(img_path, dst_img)
+
+            # ── Write YOLO label ─────────────────────────────────────────────
+            dst_lbl = output_dir / "labels" / split / (img_path.stem + ".txt")
+            with open(dst_lbl, "w") as f:
+                f.write(f"{cls_idx} {xywhn[0]:.6f} {xywhn[1]:.6f} {xywhn[2]:.6f} {xywhn[3]:.6f}\n")
+
+            labeled += 1
+
+    # ── Write unlabeled log ──────────────────────────────────────────────────
+    unlabeled_file = output_dir / "unlabeled.txt"
+    if skipped_list:
+        unlabeled_file.write_text("\n".join(skipped_list))
+        print(f"\nImages with no bird detected saved to '{unlabeled_file}' for manual review.")
+
+    # ── Write data.yaml ──────────────────────────────────────────────────────
+    data_yaml = output_dir / "data.yaml"
+    abs_dataset = output_dir.resolve().as_posix()
+
+    yaml_content = f"""# Auto-generated by auto_label.py
 path: {abs_dataset}
 train: images/train
 val:   images/val
@@ -122,18 +136,22 @@ val:   images/val
 nc: {num_classes}
 names:
 """
-for cls in classes:
-    yaml_content += f"  - {cls}\n"
+    for cls in classes:
+        yaml_content += f"  - {cls}\n"
 
-data_yaml.write_text(yaml_content)
+    data_yaml.write_text(yaml_content)
 
-# ── Summary ──────────────────────────────────────────────────────────────────
-total = labeled + skipped
-print(f"\n{'═'*50}")
-print(f"  Labeling complete!")
-print(f"  Labeled  : {labeled:>5} / {total} images")
-print(f"  Skipped  : {skipped:>5} / {total} images (no bird detected)")
-print(f"  data.yaml: {data_yaml.resolve()}")
-print(f"{'═'*50}")
-if skipped:
-    print(f"\n  ⚠  Review '{unlabeled_file}' and label manually or remove those images.")
+    # ── Summary ──────────────────────────────────────────────────────────────
+    total = labeled + skipped
+    print(f"\n{'=' * 50}")
+    print(f"  Labeling complete!")
+    print(f"  Labeled  : {labeled:>5} / {total} images")
+    print(f"  Skipped  : {skipped:>5} / {total} images (no bird detected)")
+    print(f"  data.yaml: {data_yaml.resolve()}")
+    print(f"{'=' * 50}")
+    if skipped:
+        print(f"\n  Review '{unlabeled_file}' and label manually or remove those images.")
+
+
+if __name__ == "__main__":
+    main()

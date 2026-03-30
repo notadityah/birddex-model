@@ -145,16 +145,16 @@ def download_images(
     save_dir = output_dir / folder_name
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n🔍  Fetching: '{bird_name}'  →  {save_dir}")
+    print(f"\nFetching: '{bird_name}' -> {save_dir}")
 
     try:
         urls = _inaturalist_photo_urls(bird_name, max_results=count + 30)
     except Exception as exc:
-        print(f"   ❌  Failed to fetch URLs: {exc}")
+        print(f"   [ERROR] Failed to fetch URLs: {exc}")
         return 0, 0
 
     if not urls:
-        print("   ⚠️  No photos found on iNaturalist for this species.")
+        print("   [WARN] No photos found on iNaturalist for this species.")
         return 0, 0
 
     downloaded = 0
@@ -189,15 +189,15 @@ def download_images(
                     f.write(chunk)
 
             downloaded += 1
-            print(f"   ✅  [{downloaded}/{count}] {filename.name}")
+            print(f"   [{downloaded}/{count}] {filename.name}")
             time.sleep(0.05)
 
         except Exception as exc:
-            print(f"   ⚠️  Skipped {url[:70]}…  ({exc})")
+            print(f"   [WARN] Skipped {url[:70]}  ({exc})")
             continue
 
     print(
-        f"   📁  Done: {downloaded} downloaded, {skipped} already existed  →  {save_dir}"
+        f"   Done: {downloaded} downloaded, {skipped} already existed -> {save_dir}"
     )
     return downloaded, skipped
 
@@ -249,7 +249,7 @@ def collect_bird_names(args: argparse.Namespace) -> list[str]:
     if args.file:
         file_path = Path(args.file)
         if not file_path.exists():
-            print(f"❌  Bird list file not found: {file_path}")
+            print(f"[ERROR] Bird list file not found: {file_path}")
             sys.exit(1)
         with open(file_path, encoding="utf-8") as f:
             for line in f:
@@ -258,7 +258,7 @@ def collect_bird_names(args: argparse.Namespace) -> list[str]:
                     names.append(name)
 
     if not names:
-        print("❌  No bird names provided. Use positional arguments or --file.")
+        print("[ERROR] No bird names provided. Use positional arguments or --file.")
         print('    Example: python download_bird_images.py "Laughing Kookaburra" --count 80')
         sys.exit(1)
 
@@ -271,7 +271,7 @@ def main() -> None:
     output_dir = Path(args.output)
     skip_existing = not args.no_skip
 
-    print("🐦  Bird Image Downloader  (source: iNaturalist)")
+    print("Bird Image Downloader  (source: iNaturalist)")
     print(f"    Species    : {len(bird_names)}")
     print(f"    Per species: {args.count} images")
     print(f"    Output     : {output_dir.resolve()}")
@@ -285,7 +285,7 @@ def main() -> None:
         total_dl += dl
         total_sk += sk
 
-    print(f"\n✅  All done!  Total downloaded: {total_dl}  |  Skipped: {total_sk}")
+    print(f"\nAll done!  Total downloaded: {total_dl}  |  Skipped: {total_sk}")
     print(f"    Dataset saved to: {output_dir.resolve()}")
 
 
