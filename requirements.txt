@@ -8,4 +8,5 @@ torch>=2.0
 torchvision>=0.15
 transformers>=4.30
 Pillow>=9.0
+imagehash>=4.3
 onnx>=1.14

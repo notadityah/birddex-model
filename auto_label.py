@@ -1,15 +1,21 @@
 #!/usr/bin/env python
 # auto_label.py
-# Automatically labels bird images with bounding boxes using a pretrained YOLOv8
-# bird detector (COCO class 14 = bird). Images where no bird is detected are
-# skipped and logged to 'unlabeled.txt' for manual review.
+# Automatically labels bird images with bounding boxes using a pretrained YOLO
+# bird detector (COCO class 14 = bird). Every bird box above the confidence
+# threshold is kept (not just the top-1), so multi-bird photos are fully labeled.
+# Images where no bird is detected are skipped and logged to 'unlabeled.txt'.
+#
+# The train/val/test assignment is read from dataset/split.csv (produced by
+# dedup_split.py) so the split is deduplicated and leakage-free. If split.csv is
+# absent, it falls back to a random per-species train/val split.
 #
 # Output structure (YOLO format, ready for train_model.py):
-#   dataset/images/train/   dataset/images/val/
-#   dataset/labels/train/   dataset/labels/val/
-#   data.yaml
+#   dataset/images/{train,val,test}/   dataset/labels/{train,val,test}/
+#   dataset/data.yaml   (train + val, for training)
+#   dataset/test.yaml   (held-out test, for evaluate_model.py)
 
 import argparse
+import csv
 import os
 import random
 import shutil
@@ -21,6 +27,16 @@ YOLO_BIRD_CLS = 14  # COCO class id for "bird"
 SEED = 42
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+SPLIT_NAME = "split.csv"
+
+
+def load_split(dataset_dir: Path) -> dict[str, str]:
+    """Return {filename: split} from split.csv, or {} if it doesn't exist."""
+    split_path = dataset_dir / SPLIT_NAME
+    if not split_path.exists():
+        return {}
+    with open(split_path, newline="", encoding="utf-8") as f:
+        return {row["filename"]: row["split"] for row in csv.DictReader(f)}
 
 
 def main():
@@ -28,9 +44,9 @@ def main():
         description="Auto-label bird images using a pretrained YOLO detector.",
     )
     parser.add_argument("--dataset-dir", default="dataset", help="Root dataset directory (default: dataset)")
-    parser.add_argument("--conf-thresh", type=float, default=0.20, help="Min detection confidence (default: 0.20)")
-    parser.add_argument("--val-split", type=float, default=0.10, help="Fraction for validation split (default: 0.10)")
-    parser.add_argument("--detector-model", default="yolov8n.pt", help="Pretrained detector model (default: yolov8n.pt)")
+    parser.add_argument("--conf-thresh", type=float, default=0.25, help="Min detection confidence (default: 0.25)")
+    parser.add_argument("--val-split", type=float, default=0.10, help="Val fraction when split.csv is absent (default: 0.10)")
+    parser.add_argument("--detector-model", default="yolo11x.pt", help="Pretrained detector model (default: yolo11x.pt)")
     args = parser.parse_args()
 
     dataset_dir = Path(args.dataset_dir)
@@ -59,17 +75,29 @@ def main():
     for i, c in enumerate(classes):
         print(f"  {i:>2}: {c}")
 
-    # ── Load YOLOv8 detector ─────────────────────────────────────────────────
+    # ── Load the split produced by dedup_split.py ────────────────────────────
+    split_map = load_split(dataset_dir)
+    have_test = False
+    if split_map:
+        print(f"\nUsing split.csv ({len(split_map)} images) for train/val/test assignment.")
+        have_test = "test" in split_map.values()
+    else:
+        print("\n[WARN] split.csv not found - falling back to random train/val split "
+              "(no test set, no dedup). Run dedup_split.py for a proper split.")
+
+    # ── Load YOLO detector ───────────────────────────────────────────────────
     print(f"\nLoading detector '{detector_model}' ...")
     detector = YOLO(detector_model)
 
     # ── Prepare output directories ───────────────────────────────────────────
-    for split in ("train", "val"):
+    splits = ("train", "val", "test") if have_test else ("train", "val")
+    for split in splits:
         (output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
         (output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
 
     # ── Label all images ─────────────────────────────────────────────────────
     labeled = 0
+    boxes_written = 0
     skipped = 0
     skipped_list = []
 
@@ -80,14 +108,21 @@ def main():
         if not images:
             continue
 
-        random.shuffle(images)
-        n_val = max(1, int(len(images) * val_split))
-        val_set = set(f.name for f in images[:n_val])
+        # Determine per-image split.
+        if split_map:
+            images = [f for f in images if f.name in split_map]
+        else:
+            random.shuffle(images)
+            n_val = max(1, int(len(images) * val_split))
+            fallback_val = set(f.name for f in images[:n_val])
 
-        print(f"\n[{species_dir.name}] {len(images)} images  |  {n_val} val")
+        print(f"\n[{species_dir.name}] {len(images)} images")
 
         for img_path in images:
-            split = "val" if img_path.name in val_set else "train"
+            if split_map:
+                split = split_map[img_path.name]
+            else:
+                split = "val" if img_path.name in fallback_val else "train"
 
             # ── Run detection ────────────────────────────────────────────────
             results = detector.predict(
@@ -103,18 +138,16 @@ def main():
                 skipped_list.append(str(img_path))
                 continue
 
-            # ── Pick the highest-confidence bird box ─────────────────────────
-            best_idx = int(boxes.conf.argmax())
-            xywhn = boxes.xywhn[best_idx].tolist()  # [cx, cy, w, h] normalised
-
             # ── Copy image ───────────────────────────────────────────────────
             dst_img = output_dir / "images" / split / img_path.name
             shutil.copy2(img_path, dst_img)
 
-            # ── Write YOLO label ─────────────────────────────────────────────
+            # ── Write YOLO label: one line per detected bird box ──────────────
             dst_lbl = output_dir / "labels" / split / (img_path.stem + ".txt")
             with open(dst_lbl, "w") as f:
-                f.write(f"{cls_idx} {xywhn[0]:.6f} {xywhn[1]:.6f} {xywhn[2]:.6f} {xywhn[3]:.6f}\n")
+                for box in boxes.xywhn.tolist():  # [cx, cy, w, h] normalised
+                    f.write(f"{cls_idx} {box[0]:.6f} {box[1]:.6f} {box[2]:.6f} {box[3]:.6f}\n")
+                    boxes_written += 1
 
             labeled += 1
 
@@ -124,30 +157,39 @@ def main():
         unlabeled_file.write_text("\n".join(skipped_list))
         print(f"\nImages with no bird detected saved to '{unlabeled_file}' for manual review.")
 
-    # ── Write data.yaml ──────────────────────────────────────────────────────
-    data_yaml = output_dir / "data.yaml"
+    # ── Write data.yaml (train + val) and test.yaml (held-out test) ──────────
     abs_dataset = output_dir.resolve().as_posix()
 
-    yaml_content = f"""# Auto-generated by auto_label.py
+    def write_yaml(path: Path, val_split_name: str, header: str):
+        content = f"""# {header}
 path: {abs_dataset}
 train: images/train
-val:   images/val
+val:   images/{val_split_name}
 
 nc: {num_classes}
 names:
 """
-    for cls in classes:
-        yaml_content += f"  - {cls}\n"
+        for cls in classes:
+            content += f"  - {cls}\n"
+        path.write_text(content)
 
-    data_yaml.write_text(yaml_content)
+    data_yaml = output_dir / "data.yaml"
+    write_yaml(data_yaml, "val", "Auto-generated by auto_label.py (training)")
+
+    test_yaml = None
+    if have_test:
+        test_yaml = output_dir / "test.yaml"
+        write_yaml(test_yaml, "test", "Auto-generated by auto_label.py (frozen test set)")
 
     # ── Summary ──────────────────────────────────────────────────────────────
     total = labeled + skipped
     print(f"\n{'=' * 50}")
     print(f"  Labeling complete!")
-    print(f"  Labeled  : {labeled:>5} / {total} images")
+    print(f"  Labeled  : {labeled:>5} / {total} images ({boxes_written} boxes)")
     print(f"  Skipped  : {skipped:>5} / {total} images (no bird detected)")
     print(f"  data.yaml: {data_yaml.resolve()}")
+    if test_yaml:
+        print(f"  test.yaml: {test_yaml.resolve()}")
     print(f"{'=' * 50}")
     if skipped:
         print(f"\n  Review '{unlabeled_file}' and label manually or remove those images.")

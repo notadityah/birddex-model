@@ -8,6 +8,24 @@ YOLO-based bird detection and species classification. Downloads images from iNat
 - **Species:** 36 species (see [classes.txt](classes.txt))
 - **Baseline:** `baseline/bird_detection.onnx` — the current production model to compare against
 
+## Results
+
+Both models evaluated on the same frozen, held-out test set (`dataset/test.yaml`) built by
+`dedup_split.py` — deduplicated and split at the observation level, so no test image (or
+another photo of the same bird sighting) was ever seen during training. Full per-class
+numbers are in [results.json](results.json).
+
+| Metric | Baseline (`bird_detection.onnx`) | Retrained (`best.pt`) | Δ |
+|--------|------:|------:|------:|
+| mAP50 | 0.377 | 0.744 | +0.367 |
+| mAP50-95 | 0.299 | 0.649 | +0.350 |
+| Precision | 0.577 | 0.824 | +0.247 |
+| Recall | 0.321 | 0.644 | +0.322 |
+
+Both models are the same YOLOv11s architecture — the gains come entirely from better data:
+more images per species (250 vs 80), perceptual-hash deduplication, a leakage-free split,
+and multi-bird auto-labeling (every bird in a photo gets a box, not just the top-1).
+
 ## Quick Start
 
 ```bash
@@ -15,21 +33,25 @@ YOLO-based bird detection and species classification. Downloads images from iNat
 git clone <repo-url> && cd birddex-model
 pip install -r requirements.txt
 
-# 2. Download images for a species
-python download_bird_images.py "Laughing Kookaburra" --count 80
+# 2. Download images (writes dataset/manifest.csv)
+python download_bird_images.py "Laughing Kookaburra" --count 250   # one species
+python download_bird_images.py --file birds_list.txt --count 250   # all 36 species
 
-# 3. Auto-label with bounding boxes
+# 3. Deduplicate + build a leakage-free train/val/test split
+python dedup_split.py
+
+# 4. Auto-label with bounding boxes (writes data.yaml + test.yaml)
 python auto_label.py
 
-# 4. Review labels (visual QA)
+# 5. Review labels (visual QA)
 python review_labels.py
 
-# 5. Train
+# 6. Train (on Colab GPU, or locally with --device mps)
 python train_model.py
 
-# 6. Evaluate against baseline
+# 7. Evaluate BOTH models on the frozen held-out test set
 python evaluate_model.py runs/detect/train/weights/best.pt \
-  --compare baseline/bird_detection.onnx --data dataset/data.yaml
+  --compare baseline/bird_detection.onnx --data dataset/test.yaml
 ```
 
 ## Pipeline
@@ -37,18 +59,24 @@ python evaluate_model.py runs/detect/train/weights/best.pt \
 > **Run scripts in this order.** Each step depends on the output of the previous one.
 
 ```
-download_bird_images.py       Download images from iNaturalist
+download_bird_images.py       Download images from iNaturalist (+ manifest.csv)
         |
-   auto_label.py              Auto-generate YOLO bounding boxes
+   dedup_split.py             Perceptual dedup + observation-level train/val/test split
+        |
+   auto_label.py              Auto-generate YOLO boxes (all birds), data.yaml + test.yaml
         |
   review_labels.py            Visual QA on labels
         |
   train_model.py              Train YOLOv11 on labeled dataset
         |
- evaluate_model.py            Measure mAP, precision, recall
+ evaluate_model.py            Measure mAP on the held-out test set (data: test.yaml)
         |
   yolo detect predict          Run inference on new images/videos
 ```
+
+**Fair comparison:** `dedup_split.py` holds out whole iNaturalist *observations* as a
+test set that never touches training, so `evaluate_model.py --compare ... --data
+dataset/test.yaml` scores the old and new models on identical, leakage-free data.
 
 ## Running Inference
 
@@ -69,8 +97,9 @@ yolo detect predict model=best.pt source=path/to/folder/
 
 | Script | Description | Example |
 |--------|-------------|---------|
-| `download_bird_images.py` | Download images from iNaturalist | `python download_bird_images.py "Galah" --count 80` |
-| `auto_label.py` | Auto-generate YOLO bounding boxes | `python auto_label.py --conf-thresh 0.25` |
+| `download_bird_images.py` | Download images from iNaturalist (+ manifest.csv) | `python download_bird_images.py "Galah" --count 250` |
+| `dedup_split.py` | Perceptual dedup + leakage-free train/val/test split | `python dedup_split.py --phash-thresh 5` |
+| `auto_label.py` | Auto-generate YOLO bounding boxes (all birds) | `python auto_label.py --conf-thresh 0.25` |
 | `review_labels.py` | Visually review generated labels | `python review_labels.py --n 50` |
 | `train_model.py` | Train YOLO model | `python train_model.py --epochs 100 --model yolo11m.pt` |
 | `evaluate_model.py` | Evaluate and compare models | `python evaluate_model.py best.pt --compare baseline/bird_detection.onnx` |

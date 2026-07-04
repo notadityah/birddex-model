@@ -23,24 +23,32 @@ pip install -r requirements.txt
 
 ### Core Workflows
 
-**1. Download Images from iNaturalist**
+**1. Download Images from iNaturalist** (writes `dataset/manifest.csv`)
 
 ```bash
-python download_bird_images.py "Laughing Kookaburra" --count 80
-python download_bird_images.py --file birds.txt --count 80
-python download_bird_images.py "Galah" --count 60 --output my_dataset
+python download_bird_images.py "Laughing Kookaburra" --count 250
+python download_bird_images.py --file birds_list.txt --count 250
+python download_bird_images.py "Galah" --count 250 --output my_dataset
 ```
 
-**2. Prepare Dataset (Auto-labeling)**
+**2. Deduplicate + Split** (perceptual dedup, observation-level train/val/test)
 
 ```bash
-python auto_label.py                              # defaults
+python dedup_split.py                    # defaults: 80/10/10, phash-thresh 5
+python dedup_split.py --phash-thresh 8   # more aggressive dedup
+# Output: dataset/split.csv (filename -> split), leakage-free by observation id
+```
+
+**3. Prepare Dataset (Auto-labeling)**
+
+```bash
+python auto_label.py                              # defaults (yolo11x.pt, reads split.csv)
 python auto_label.py --conf-thresh 0.30           # override confidence
-python auto_label.py --val-split 0.15             # override val split
-# Output: dataset/images/{train,val}/ and dataset/labels/{train,val}/ in YOLO format
+# Output: dataset/images/{train,val,test}/ + labels/, plus data.yaml AND test.yaml
+# Keeps EVERY bird box above --conf-thresh (multi-bird images fully labeled)
 ```
 
-**3. Review Auto-Generated Labels**
+**4. Review Auto-Generated Labels**
 
 ```bash
 python review_labels.py           # Review 20 random images
@@ -48,7 +56,7 @@ python review_labels.py --n 50    # Review 50 images
 python review_labels.py --split val  # Review validation set only
 ```
 
-**4. Train Model**
+**5. Train Model**
 
 ```bash
 python train_model.py                                    # defaults (yolo11s.pt, 50 epochs)
@@ -56,20 +64,23 @@ python train_model.py --epochs 100 --model yolo11m.pt    # overrides
 python train_model.py --help                             # all flags
 ```
 
-**5. Evaluate Model**
+**6. Evaluate Model**
 
 ```bash
-# Single model evaluation
-python evaluate_model.py runs/detect/train/weights/best.pt --data dataset/data.yaml
+# Single model evaluation on the frozen held-out test set
+python evaluate_model.py runs/detect/train/weights/best.pt --data dataset/test.yaml
 
-# Compare two models head-to-head
-python evaluate_model.py new_model.pt --compare old_model.pt --data dataset/data.yaml
+# Compare new vs current model head-to-head (same test set = fair)
+python evaluate_model.py new_model.pt --compare baseline/bird_detection.onnx --data dataset/test.yaml
 
 # Save results to JSON
-python evaluate_model.py best.pt --data dataset/data.yaml --save results.json
+python evaluate_model.py best.pt --data dataset/test.yaml --save results.json
 ```
 
-**6. Run Inference (using ultralytics CLI)**
+> Always evaluate with `--data dataset/test.yaml` (not `data.yaml`) so the score is on
+> observations never seen during training. `data.yaml`'s val set is used only for training.
+
+**7. Run Inference (using ultralytics CLI)**
 
 ```bash
 yolo detect predict model=best.pt source=path/to/image.jpg
@@ -77,14 +88,14 @@ yolo detect predict model=best.pt source=path/to/video.mp4
 yolo detect predict model=best.pt source=path/to/folder/
 ```
 
-**7. Classify Bird Species**
+**8. Classify Bird Species**
 
 ```bash
 python classify_bird.py <image_path> [--top 5]
 # Uses chriamue/bird-species-classifier from HuggingFace
 ```
 
-**8. Export & Inspect Models**
+**9. Export & Inspect Models**
 
 ```bash
 python convert_model.py best.pt              # Export to ONNX
@@ -98,14 +109,13 @@ python inspect_model.py model.onnx           # Inspect .onnx model
 ### Main Components
 
 1. **Data Preparation Pipeline**
-   - `download_bird_images.py` - Fetches images from iNaturalist API (public, no key needed)
-   - `auto_label.py` - Auto-generates bounding boxes using YOLOv8n detector (COCO bird class)
-   - Detections filtered by confidence threshold (default 0.20, configurable via `--conf-thresh`)
-   - Splits data: 90% train / 10% validation (configurable via `--val-split`)
+   - `download_bird_images.py` - Fetches images from iNaturalist API (public, no key needed); records observation id + perceptual hash to `dataset/manifest.csv`
+   - `dedup_split.py` - Drops near-duplicate photos (pHash) and splits at the observation level into train/val/test (80/10/10), guaranteeing the test set shares no observation with train/val (no leakage). Emits `dataset/split.csv`
+   - `auto_label.py` - Auto-generates bounding boxes using a YOLO detector (default `yolo11x.pt`, COCO bird class 14); keeps every box above `--conf-thresh` (default 0.25); honors `split.csv`
 
 2. **Training & Model Management**
    - `train_model.py` - Trains YOLOv11s on custom dataset (all params configurable via CLI)
-   - Uses YOLO format: `dataset/{images,labels}/{train,val}/`
+   - Uses YOLO format: `dataset/{images,labels}/{train,val,test}/`
    - Configuration: `data.yaml` (paths, class names, count)
    - Outputs best model to `runs/detect/train/weights/best.pt`
 
@@ -133,13 +143,18 @@ dataset/
 ├── <species_name>/          # Raw image folders
 │   ├── bird1.jpg
 │   └── ...
+├── manifest.csv             # species, obs_id, filename, phash (download_bird_images.py)
+├── split.csv                # filename -> train/val/test  (dedup_split.py)
 ├── images/
-│   ├── train/              # 90% of images
-│   └── val/                # 10% of images
+│   ├── train/              # ~80% of observations
+│   ├── val/                # ~10% of observations
+│   └── test/               # ~10% held out, leakage-free
 ├── labels/
-│   ├── train/              # YOLO .txt format
-│   └── val/
-└── data.yaml               # Generated by auto_label.py
+│   ├── train/              # YOLO .txt format (one line per bird box)
+│   ├── val/
+│   └── test/
+├── data.yaml               # train + val (for training)
+└── test.yaml               # test set (for evaluate_model.py)
 ```
 
 **YOLO Label Format** (`labels/train/image.txt`):
@@ -168,6 +183,7 @@ Where cx, cy, w, h are normalized (0-1) relative to image dimensions.
 - `numpy`, `matplotlib` - Numerical/visualization
 - `requests` - HTTP requests (iNaturalist API)
 - `Pillow` - Image processing
+- `imagehash` - Perceptual hashing for dataset deduplication (dedup_split.py)
 - `onnx` - ONNX model inspection
 
 ## Important Implementation Details
@@ -179,10 +195,12 @@ Where cx, cy, w, h are normalized (0-1) relative to image dimensions.
 
 ### Auto-labeling (auto_label.py)
 
-- Uses YOLOv8n detector to find birds (COCO class 14)
-- Only keeps highest-confidence detection per image
+- Uses a YOLO detector to find birds (COCO class 14); default `yolo11x.pt` for quality
+- Keeps EVERY box above `--conf-thresh` (default 0.25) - multi-bird photos fully labeled
+- Reads `dataset/split.csv` for train/val/test placement (falls back to random val split)
 - Skips images where no bird detected (logged to `unlabeled.txt`)
 - All config via CLI flags: `--conf-thresh`, `--val-split`, `--detector-model`, `--dataset-dir`
+- Writes both `data.yaml` (train+val) and `test.yaml` (held-out test)
 
 ### Evaluation (evaluate_model.py)
 

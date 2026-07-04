@@ -5,7 +5,24 @@ from pathlib import Path
 from ultralytics import YOLO
 
 
+def resolve_device(device: str) -> str:
+    """Resolve 'auto' to cuda GPU 0, Apple MPS, or CPU (in that order)."""
+    if device != "auto":
+        return device
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "0"
+        if torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def train(args):
+    args.device = resolve_device(args.device)
+    print(f"Training on device: {args.device}")
     # OPTION 1 (default): Start from a pretrained base model and train on your
     # FULL dataset (old + new birds).  This prevents "catastrophic forgetting".
     #
@@ -40,7 +57,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs (default: 50)")
     parser.add_argument("--imgsz", type=int, default=640, help="Image size, must be multiple of 32 (default: 640)")
     parser.add_argument("--batch", type=int, default=-1, help="Batch size, -1 for auto (default: -1)")
-    parser.add_argument("--device", default="0", help="Device to train on: 0, 1, cpu, etc. (default: 0)")
+    parser.add_argument("--device", default="auto", help="Device: auto (cuda>mps>cpu), 0, mps, cpu, etc. (default: auto)")
     parser.add_argument("--patience", type=int, default=50, help="Early stopping patience (default: 50)")
     args = parser.parse_args()
 

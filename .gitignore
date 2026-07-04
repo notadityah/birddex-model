@@ -10,6 +10,10 @@ env/
 # Datasets and auto-labeled data
 dataset/
 unlabeled.txt
+*.zip
+
+# Pipeline logs
+pipeline*.log
 
 # YOLO training runs
 runs/

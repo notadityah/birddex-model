@@ -1,0 +1,37 @@
+# iNaturalist search name | folder slug (must match classes.txt for a valid baseline comparison)
+Australian King-Parrot | australian_king_parrot
+Australian Magpie | australian_magpie
+Australian Raven | australian_raven
+Black-faced Cuckooshrike | black_faced_cuckoo_shrike
+Common Blackbird | common_blackbird
+Common Myna | common_myna
+Crested Pigeon | crested_pigeon
+Crimson Rosella | crimson_rosella
+Eastern Spinebill | eastern_spinebill
+Eastern Yellow Robin | eastern_yellow_robin
+Galah | galah
+Grey Butcherbird | grey_butcherbird
+Grey Fantail | grey_fantail
+House Sparrow | house_sparrow
+Pacific Koel | koel
+Laughing Kookaburra | laughing_kookaburra
+Little Wattlebird | little_wattlebird
+Magpie-lark | magpie_lark
+New Holland Honeyeater | new_holland_honeyeater
+Noisy Miner | noisy_miner
+Pied Butcherbird | pied_butcherbird
+Pied Currawong | pied_currawong
+Australasian Swamphen | purple_swamphen
+Rainbow Lorikeet | rainbow_lorikeet
+Red-browed Finch | red_browed_finch
+Red Wattlebird | red_wattlebird
+Red-whiskered Bulbul | red_whiskered_bulbul
+Rock Dove | rock_dove
+Silvereye | silvereye
+Spotted Pardalote | spotted_pardalote
+Spotted Dove | spotted_turtle_dove
+Sulphur-crested Cockatoo | sulphur_crested_cockatoo
+Superb Fairywren | superb_fairy_wren
+Welcome Swallow | welcome_swallow
+Willie Wagtail | willie_wagtail
+Yellow-tailed Black-Cockatoo | yellow_tailed_black_cockatoo
